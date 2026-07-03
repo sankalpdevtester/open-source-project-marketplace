@@ -1,110 +1,102 @@
 // src/utils/cache.ts
 import { Cache } from 'memory-cache';
-import { setTimeout } from 'timers';
+import { prisma } from '../prisma/middleware';
 
-// Initialize cache with a TTL of 1 hour
-const cache = new Cache(3600000);
-
-// Function to get cached value
-export function getCachedValue(key: string): any {
-  return cache.get(key);
+interface CacheOptions {
+  ttl: number; // time to live in seconds
 }
 
-// Function to set cached value
-export function setCachedValue(key: string, value: any): void {
-  cache.put(key, value);
-}
+const cache = new Cache();
 
-// Function to delete cached value
-export function deleteCachedValue(key: string): void {
-  cache.del(key);
-}
+const cacheKey = (key: string) => `cache:${key}`;
 
-// Function to check if a key exists in the cache
-export function hasCachedValue(key: string): boolean {
-  return cache.has(key);
-}
+const getCache = (key: string) => {
+  return cache.get(cacheKey(key));
+};
 
-// Function to clear the entire cache
-export function clearCache(): void {
+const setCache = (key: string, value: any, options: CacheOptions) => {
+  cache.put(cacheKey(key), value, options.ttl * 1000);
+};
+
+const deleteCache = (key: string) => {
+  cache.del(cacheKey(key));
+};
+
+const clearCache = () => {
   cache.clear();
-}
+};
 
-// Example usage:
-// const cachedValue = getCachedValue('projectRating');
-// if (!cachedValue) {
-//   const projectRating = await fetchProjectRating();
-//   setCachedValue('projectRating', projectRating);
-// }
+const getProjectRatingCacheKey = (projectId: number) => {
+  return `projectRating:${projectId}`;
+};
 
-// Integrate with existing projectRating.tsx file
-import { getProjectRating } from '../features/projectRating';
+const getProjectRecommendationCacheKey = (projectId: number) => {
+  return `projectRecommendation:${projectId}`;
+};
 
-// Create a cache key for project ratings
-const projectRatingCacheKey = 'projectRating';
+const getProjectDiscussionCacheKey = (projectId: number) => {
+  return `projectDiscussion:${projectId}`;
+};
 
-// Function to fetch project rating with caching
-export async function fetchProjectRatingWithCache(projectId: number): Promise<any> {
-  const cachedProjectRating = getCachedValue(projectRatingCacheKey);
-  if (cachedProjectRating) {
-    return cachedProjectRating;
+const getUserProfileCacheKey = (userId: number) => {
+  return `userProfile:${userId}`;
+};
+
+const getProjectRating = async (projectId: number) => {
+  const cacheKey = getProjectRatingCacheKey(projectId);
+  const cachedValue = getCache(cacheKey);
+  if (cachedValue) {
+    return cachedValue;
   }
-
-  const projectRating = await getProjectRating(projectId);
-  setCachedValue(projectRatingCacheKey, projectRating);
+  const projectRating = await prisma.projectRating.findFirst({
+    where: { projectId },
+  });
+  setCache(cacheKey, projectRating, { ttl: 60 });
   return projectRating;
-}
+};
 
-// Integrate with existing projectRecommendation.tsx file
-import { getProjectRecommendations } from '../features/projectRecommendation';
-
-// Create a cache key for project recommendations
-const projectRecommendationCacheKey = 'projectRecommendations';
-
-// Function to fetch project recommendations with caching
-export async function fetchProjectRecommendationsWithCache(userId: number): Promise<any> {
-  const cachedProjectRecommendations = getCachedValue(projectRecommendationCacheKey);
-  if (cachedProjectRecommendations) {
-    return cachedProjectRecommendations;
+const getProjectRecommendation = async (projectId: number) => {
+  const cacheKey = getProjectRecommendationCacheKey(projectId);
+  const cachedValue = getCache(cacheKey);
+  if (cachedValue) {
+    return cachedValue;
   }
+  const projectRecommendation = await prisma.projectRecommendation.findFirst({
+    where: { projectId },
+  });
+  setCache(cacheKey, projectRecommendation, { ttl: 60 });
+  return projectRecommendation;
+};
 
-  const projectRecommendations = await getProjectRecommendations(userId);
-  setCachedValue(projectRecommendationCacheKey, projectRecommendations);
-  return projectRecommendations;
-}
-
-// Integrate with existing projectDiscussion.tsx file
-import { getProjectDiscussions } from '../features/projectDiscussion';
-
-// Create a cache key for project discussions
-const projectDiscussionCacheKey = 'projectDiscussions';
-
-// Function to fetch project discussions with caching
-export async function fetchProjectDiscussionsWithCache(projectId: number): Promise<any> {
-  const cachedProjectDiscussions = getCachedValue(projectDiscussionCacheKey);
-  if (cachedProjectDiscussions) {
-    return cachedProjectDiscussions;
+const getProjectDiscussion = async (projectId: number) => {
+  const cacheKey = getProjectDiscussionCacheKey(projectId);
+  const cachedValue = getCache(cacheKey);
+  if (cachedValue) {
+    return cachedValue;
   }
+  const projectDiscussion = await prisma.projectDiscussion.findFirst({
+    where: { projectId },
+  });
+  setCache(cacheKey, projectDiscussion, { ttl: 60 });
+  return projectDiscussion;
+};
 
-  const projectDiscussions = await getProjectDiscussions(projectId);
-  setCachedValue(projectDiscussionCacheKey, projectDiscussions);
-  return projectDiscussions;
-}
-
-// Integrate with existing userProfile.tsx file
-import { getUserProfile } from '../features/userProfile';
-
-// Create a cache key for user profiles
-const userProfileCacheKey = 'userProfile';
-
-// Function to fetch user profile with caching
-export async function fetchUserProfileWithCache(userId: number): Promise<any> {
-  const cachedUserProfile = getCachedValue(userProfileCacheKey);
-  if (cachedUserProfile) {
-    return cachedUserProfile;
+const getUserProfile = async (userId: number) => {
+  const cacheKey = getUserProfileCacheKey(userId);
+  const cachedValue = getCache(cacheKey);
+  if (cachedValue) {
+    return cachedValue;
   }
-
-  const userProfile = await getUserProfile(userId);
-  setCachedValue(userProfileCacheKey, userProfile);
+  const userProfile = await prisma.userProfile.findFirst({
+    where: { userId },
+  });
+  setCache(cacheKey, userProfile, { ttl: 60 });
   return userProfile;
-}
+};
+
+export {
+  getProjectRating,
+  getProjectRecommendation,
+  getProjectDiscussion,
+  getUserProfile,
+};
