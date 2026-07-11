@@ -1,125 +1,102 @@
 // src/utils/projectUtils.ts
 import { PrismaClient } from '@prisma/client';
 import { Project } from '@prisma/client';
-import { authenticator } from '../services/authenticator';
+import { z } from 'zod';
 
 const prisma = new PrismaClient();
 
-/**
- * Validate project data before creating or updating a project
- * @param projectData - Project data to be validated
- * @returns - Validated project data or throws an error if invalid
- */
-export function validateProjectData(projectData: any): Project {
-  if (!projectData.name || !projectData.description || !projectData.category) {
-    throw new Error('Project name, description, and category are required');
-  }
+// Define a schema for project data validation
+const projectSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(255),
+  description: z.string().min(1).max(1000),
+  categories: z.array(z.string().min(1).max(255)),
+});
 
-  if (projectData.name.length < 3 || projectData.name.length > 50) {
-    throw new Error('Project name must be between 3 and 50 characters');
+// Validate project data using the schema
+export function validateProjectData(data: any): Project | null {
+  try {
+    const result = projectSchema.parse(data);
+    return result;
+  } catch (error) {
+    console.error('Error validating project data:', error);
+    return null;
   }
-
-  if (projectData.description.length < 10 || projectData.description.length > 500) {
-    throw new Error('Project description must be between 10 and 500 characters');
-  }
-
-  return projectData as Project;
 }
 
-/**
- * Get project categories from the database
- * @returns - List of project categories
- */
+// Get a list of all project categories from the database
 export async function getProjectCategories(): Promise<string[]> {
-  const categories = await prisma.project.findMany({
+  const projects = await prisma.project.findMany({
     select: {
-      category: true,
+      categories: true,
     },
-    distinct: ['category'],
   });
 
-  return categories.map((category) => category.category);
+  const categories: string[] = [];
+  projects.forEach((project) => {
+    project.categories.forEach((category) => {
+      if (!categories.includes(category)) {
+        categories.push(category);
+      }
+    });
+  });
+
+  return categories;
 }
 
-/**
- * Get project recommendations based on user's interests
- * @param userId - ID of the user
- * @returns - List of recommended projects
- */
-export async function getProjectRecommendations(userId: number): Promise<Project[]> {
-  const user = await authenticator.getUser(userId);
-  const userInterests = user.interests;
-
-  const recommendedProjects = await prisma.project.findMany({
+// Get a list of recommended projects based on a user's interests
+export async function getRecommendedProjects(userId: string): Promise<Project[]> {
+  const user = await prisma.user.findUnique({
     where: {
-      category: {
-        in: userInterests,
+      id: userId,
+    },
+    include: {
+      interests: true,
+    },
+  });
+
+  if (!user || !user.interests) {
+    return [];
+  }
+
+  const recommendedProjects: Project[] = [];
+  const projects = await prisma.project.findMany({
+    where: {
+      categories: {
+        hasSome: user.interests,
       },
     },
+  });
+
+  projects.forEach((project) => {
+    if (!recommendedProjects.includes(project)) {
+      recommendedProjects.push(project);
+    }
   });
 
   return recommendedProjects;
 }
 
-/**
- * Get project rating statistics
- * @param projectId - ID of the project
- * @returns - Project rating statistics
- */
-export async function getProjectRatingStats(projectId: number): Promise<any> {
-  const projectRatings = await prisma.projectRating.findMany({
+// Update a project's rating based on new user feedback
+export async function updateProjectRating(projectId: string, rating: number): Promise<void> {
+  const project = await prisma.project.findUnique({
     where: {
-      projectId: projectId,
+      id: projectId,
     },
   });
 
-  const ratingStats = {
-    averageRating: 0,
-    totalRatings: 0,
-  };
-
-  if (projectRatings.length > 0) {
-    const totalRating = projectRatings.reduce((acc, rating) => acc + rating.rating, 0);
-    ratingStats.averageRating = totalRating / projectRatings.length;
-    ratingStats.totalRatings = projectRatings.length;
+  if (!project) {
+    throw new Error(`Project not found: ${projectId}`);
   }
 
-  return ratingStats;
-}
-
-/**
- * Update project rating
- * @param projectId - ID of the project
- * @param userId - ID of the user
- * @param rating - New rating
- * @returns - Updated project rating
- */
-export async function updateProjectRating(projectId: number, userId: number, rating: number): Promise<any> {
-  const existingRating = await prisma.projectRating.findFirst({
+  const newRating = (project.rating * project.ratingCount + rating) / (project.ratingCount + 1);
+  await prisma.project.update({
     where: {
-      projectId: projectId,
-      userId: userId,
+      id: projectId,
+    },
+    data: {
+      rating: newRating,
+      ratingCount: project.ratingCount + 1,
     },
   });
-
-  if (existingRating) {
-    await prisma.projectRating.update({
-      where: {
-        id: existingRating.id,
-      },
-      data: {
-        rating: rating,
-      },
-    });
-  } else {
-    await prisma.projectRating.create({
-      data: {
-        projectId: projectId,
-        userId: userId,
-        rating: rating,
-      },
-    });
-  }
-
-  return await getProjectRatingStats(projectId);
 }
