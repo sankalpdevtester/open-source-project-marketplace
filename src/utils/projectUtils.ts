@@ -7,96 +7,104 @@ const prisma = new PrismaClient();
 
 // Define a schema for project data validation
 const projectSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1).max(255),
-  description: z.string().min(1).max(1000),
-  categories: z.array(z.string().min(1).max(255)),
+  id: z.number(),
+  name: z.string(),
+  description: z.string(),
+  categories: z.array(z.string()),
+  rating: z.number(),
 });
 
-// Validate project data using the schema
+// Function to validate project data
 export function validateProjectData(data: any): Project | null {
   try {
     const result = projectSchema.parse(data);
     return result;
   } catch (error) {
-    console.error('Error validating project data:', error);
+    console.error('Invalid project data:', error);
     return null;
   }
 }
 
-// Get a list of all project categories from the database
+// Function to get project categories from the database
 export async function getProjectCategories(): Promise<string[]> {
-  const projects = await prisma.project.findMany({
+  const categories = await prisma.project.findMany({
     select: {
       categories: true,
     },
+    distinct: ['categories'],
   });
 
-  const categories: string[] = [];
-  projects.forEach((project) => {
+  const categoryList: string[] = [];
+  categories.forEach((project) => {
     project.categories.forEach((category) => {
-      if (!categories.includes(category)) {
-        categories.push(category);
+      if (!categoryList.includes(category)) {
+        categoryList.push(category);
       }
     });
   });
 
-  return categories;
+  return categoryList;
 }
 
-// Get a list of recommended projects based on a user's interests
-export async function getRecommendedProjects(userId: string): Promise<Project[]> {
-  const user = await prisma.user.findUnique({
+// Function to calculate the average rating of a project
+export async function calculateProjectRating(projectId: number): Promise<number | null> {
+  const ratings = await prisma.projectRating.findMany({
+    where: {
+      projectId: projectId,
+    },
+  });
+
+  if (ratings.length === 0) {
+    return null;
+  }
+
+  const sum = ratings.reduce((acc, rating) => acc + rating.rating, 0);
+  const average = sum / ratings.length;
+
+  return average;
+}
+
+// Function to get project recommendations based on user interests
+export async function getProjectRecommendations(userId: number): Promise<Project[] | null> {
+  const userInterests = await prisma.userProfile.findUnique({
     where: {
       id: userId,
     },
-    include: {
+    select: {
       interests: true,
     },
   });
 
-  if (!user || !user.interests) {
-    return [];
+  if (!userInterests || !userInterests.interests) {
+    return null;
   }
 
-  const recommendedProjects: Project[] = [];
-  const projects = await prisma.project.findMany({
+  const recommendedProjects = await prisma.project.findMany({
     where: {
       categories: {
-        hasSome: user.interests,
+        hasSome: userInterests.interests,
       },
     },
-  });
-
-  projects.forEach((project) => {
-    if (!recommendedProjects.includes(project)) {
-      recommendedProjects.push(project);
-    }
   });
 
   return recommendedProjects;
 }
 
-// Update a project's rating based on new user feedback
-export async function updateProjectRating(projectId: string, rating: number): Promise<void> {
-  const project = await prisma.project.findUnique({
-    where: {
-      id: projectId,
-    },
-  });
+// Function to update project discussion comments
+export async function updateProjectDiscussion(projectId: number, commentId: number, commentText: string): Promise<boolean> {
+  try {
+    await prisma.projectDiscussion.update({
+      where: {
+        id: commentId,
+      },
+      data: {
+        text: commentText,
+      },
+    });
 
-  if (!project) {
-    throw new Error(`Project not found: ${projectId}`);
+    return true;
+  } catch (error) {
+    console.error('Error updating project discussion:', error);
+    return false;
   }
-
-  const newRating = (project.rating * project.ratingCount + rating) / (project.ratingCount + 1);
-  await prisma.project.update({
-    where: {
-      id: projectId,
-    },
-    data: {
-      rating: newRating,
-      ratingCount: project.ratingCount + 1,
-    },
-  });
 }
