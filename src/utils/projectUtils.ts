@@ -15,96 +15,95 @@ const projectSchema = z.object({
 });
 
 // Function to validate project data
-export function validateProjectData(data: any): Project | null {
-  try {
-    const result = projectSchema.parse(data);
-    return result;
-  } catch (error) {
-    console.error('Invalid project data:', error);
-    return null;
-  }
-}
+export const validateProjectData = (data: any) => {
+  return projectSchema.safeParse(data);
+};
 
-// Function to get project categories from the database
-export async function getProjectCategories(): Promise<string[]> {
+// Function to get project categories
+export const getProjectCategories = async () => {
   const categories = await prisma.project.findMany({
     select: {
       categories: true,
     },
-    distinct: ['categories'],
   });
 
-  const categoryList: string[] = [];
-  categories.forEach((project) => {
-    project.categories.forEach((category) => {
-      if (!categoryList.includes(category)) {
-        categoryList.push(category);
-      }
-    });
+  const uniqueCategories = Array.from(new Set(categories.flatMap((project) => project.categories)));
+
+  return uniqueCategories;
+};
+
+// Function to get project recommendations based on user interests
+export const getProjectRecommendations = async (userId: number) => {
+  const userProjects = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      projects: true,
+    },
   });
 
-  return categoryList;
-}
+  const userProjectIds = userProjects?.projects.map((project) => project.id) || [];
 
-// Function to calculate the average rating of a project
-export async function calculateProjectRating(projectId: number): Promise<number | null> {
-  const ratings = await prisma.projectRating.findMany({
+  const recommendedProjects = await prisma.project.findMany({
+    where: {
+      NOT: {
+        id: {
+          in: userProjectIds,
+        },
+      },
+    },
+    take: 10,
+  });
+
+  return recommendedProjects;
+};
+
+// Function to update project rating
+export const updateProjectRating = async (projectId: number, rating: number) => {
+  const project = await prisma.project.findUnique({
+    where: {
+      id: projectId,
+    },
+  });
+
+  if (!project) {
+    throw new Error('Project not found');
+  }
+
+  const updatedProject = await prisma.project.update({
+    where: {
+      id: projectId,
+    },
+    data: {
+      rating: (project.rating * project.ratingCount + rating) / (project.ratingCount + 1),
+      ratingCount: project.ratingCount + 1,
+    },
+  });
+
+  return updatedProject;
+};
+
+// Function to get project discussion threads
+export const getProjectDiscussionThreads = async (projectId: number) => {
+  const discussionThreads = await prisma.discussionThread.findMany({
     where: {
       projectId: projectId,
     },
   });
 
-  if (ratings.length === 0) {
-    return null;
-  }
+  return discussionThreads;
+};
 
-  const sum = ratings.reduce((acc, rating) => acc + rating.rating, 0);
-  const average = sum / ratings.length;
-
-  return average;
-}
-
-// Function to get project recommendations based on user interests
-export async function getProjectRecommendations(userId: number): Promise<Project[] | null> {
-  const userInterests = await prisma.userProfile.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      interests: true,
+// Function to create a new project discussion thread
+export const createProjectDiscussionThread = async (projectId: number, title: string, content: string) => {
+  const discussionThread = await prisma.discussionThread.create({
+    data: {
+      projectId: projectId,
+      title: title,
+      content: content,
     },
   });
 
-  if (!userInterests || !userInterests.interests) {
-    return null;
-  }
-
-  const recommendedProjects = await prisma.project.findMany({
-    where: {
-      categories: {
-        hasSome: userInterests.interests,
-      },
-    },
-  });
-
-  return recommendedProjects;
-}
-
-// Function to update project discussion comments
-export async function updateProjectDiscussion(projectId: number, commentId: number, commentText: string): Promise<boolean> {
-  try {
-    await prisma.projectDiscussion.update({
-      where: {
-        id: commentId,
-      },
-      data: {
-        text: commentText,
-      },
-    });
-
-    return true;
-  } catch (error) {
-    console.error('Error updating project discussion:', error);
-    return false;
-  }
-}
+  return discussionThread;
+};
