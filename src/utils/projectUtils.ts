@@ -11,99 +11,70 @@ const projectSchema = z.object({
   name: z.string(),
   description: z.string(),
   categories: z.array(z.string()),
-  rating: z.number(),
+  ratings: z.array(z.number()),
 });
 
 // Function to validate project data
-export const validateProjectData = (data: any) => {
-  return projectSchema.safeParse(data);
-};
+export function validateProjectData(data: any): Project | null {
+  try {
+    return projectSchema.parse(data);
+  } catch (error) {
+    console.error('Error validating project data:', error);
+    return null;
+  }
+}
 
-// Function to get project categories
-export const getProjectCategories = async () => {
+// Function to calculate the average rating of a project
+export function calculateAverageRating(project: Project): number {
+  if (!project.ratings || project.ratings.length === 0) {
+    return 0;
+  }
+  const sum = project.ratings.reduce((acc, rating) => acc + rating, 0);
+  return sum / project.ratings.length;
+}
+
+// Function to get the top-rated projects
+export async function getTopRatedProjects(limit: number): Promise<Project[]> {
+  const projects = await prisma.project.findMany({
+    include: {
+      ratings: true,
+    },
+    orderBy: {
+      averageRating: 'desc',
+    },
+    take: limit,
+  });
+  return projects;
+}
+
+// Function to get the project categories
+export async function getProjectCategories(): Promise<string[]> {
   const categories = await prisma.project.findMany({
     select: {
       categories: true,
     },
   });
-
   const uniqueCategories = Array.from(new Set(categories.flatMap((project) => project.categories)));
-
   return uniqueCategories;
-};
+}
 
-// Function to get project recommendations based on user interests
-export const getProjectRecommendations = async (userId: number) => {
-  const userProjects = await prisma.user.findUnique({
+// Function to search for projects by name or description
+export async function searchProjects(query: string): Promise<Project[]> {
+  const projects = await prisma.project.findMany({
     where: {
-      id: userId,
-    },
-    select: {
-      projects: true,
-    },
-  });
-
-  const userProjectIds = userProjects?.projects.map((project) => project.id) || [];
-
-  const recommendedProjects = await prisma.project.findMany({
-    where: {
-      NOT: {
-        id: {
-          in: userProjectIds,
+      OR: [
+        {
+          name: {
+            contains: query,
+          },
         },
-      },
-    },
-    take: 10,
-  });
-
-  return recommendedProjects;
-};
-
-// Function to update project rating
-export const updateProjectRating = async (projectId: number, rating: number) => {
-  const project = await prisma.project.findUnique({
-    where: {
-      id: projectId,
+        {
+          description: {
+            contains: query,
+          },
+        },
+      ],
     },
   });
-
-  if (!project) {
-    throw new Error('Project not found');
-  }
-
-  const updatedProject = await prisma.project.update({
-    where: {
-      id: projectId,
-    },
-    data: {
-      rating: (project.rating * project.ratingCount + rating) / (project.ratingCount + 1),
-      ratingCount: project.ratingCount + 1,
-    },
-  });
-
-  return updatedProject;
-};
-
-// Function to get project discussion threads
-export const getProjectDiscussionThreads = async (projectId: number) => {
-  const discussionThreads = await prisma.discussionThread.findMany({
-    where: {
-      projectId: projectId,
-    },
-  });
-
-  return discussionThreads;
-};
-
-// Function to create a new project discussion thread
-export const createProjectDiscussionThread = async (projectId: number, title: string, content: string) => {
-  const discussionThread = await prisma.discussionThread.create({
-    data: {
-      projectId: projectId,
-      title: title,
-      content: content,
-    },
-  });
-
-  return discussionThread;
-};
+  return projects;
+}
